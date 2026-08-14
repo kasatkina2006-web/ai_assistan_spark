@@ -18,27 +18,9 @@ if not TELEGRAM_BOT_TOKEN or not GEMINI_API_KEY:
 # Инициализация Gemini
 genai.configure(api_key=GEMINI_API_KEY)
 
-def init_gemini_model():
-    """Автоматический поиск доступной модели Gemini для вашего ключа"""
-    try:
-        available = [
-            m.name for m in genai.list_models()
-            if "generateContent" in m.supported_generation_methods
-        ]
-        # Ищем доступную flash-модель (gemini-2.5-flash, gemini-2.0-flash и т.д.)
-        for name in available:
-            if "flash" in name.lower() and "preview" not in name.lower():
-                print(f"Используем модель: {name}")
-                return genai.GenerativeModel(name)
-        # Если flash нет, берем первую доступную
-        if available:
-            print(f"Используем модель: {available[0]}")
-            return genai.GenerativeModel(available[0])
-    except Exception as e:
-        print(f"Ошибка получения списка моделей: {e}")
-    return genai.GenerativeModel("gemini-2.0-flash")
-
-model = init_gemini_model()
+# Актуальная модель Gemini 3 Flash Preview из вашего аккаунта
+MODEL_NAME = "gemini-3-flash-preview"
+model = genai.GenerativeModel(MODEL_NAME)
 
 # Инициализация Telegram-бота
 bot = Bot(token=TELEGRAM_BOT_TOKEN)
@@ -55,18 +37,24 @@ async def message_handler(message: types.Message):
 
     await bot.send_chat_action(chat_id=message.chat.id, action="typing")
 
-    global model
     try:
         response = model.generate_content(message.text)
         await message.answer(response.text)
     except Exception as e:
-        # Если модель выдала сбой, пробуем переподключить активную модель
-        try:
-            model = init_gemini_model()
-            response = model.generate_content(message.text)
-            await message.answer(response.text)
-        except Exception as retry_err:
-            await message.answer(f"Ошибка при обработке запроса: {retry_err}")
+        # Запасные варианты моделей в случае сбоя
+        fallback_models = ["gemini-3-flash-preview", "gemini-3-pro-preview", "gemini-2.5-pro"]
+        success = False
+        for fallback in fallback_models:
+            try:
+                temp_model = genai.GenerativeModel(fallback)
+                response = temp_model.generate_content(message.text)
+                await message.answer(response.text)
+                success = True
+                break
+            except Exception:
+                continue
+        if not success:
+            await message.answer(f"Ошибка при обработке запроса: {e}")
 
 # Микро-сервер для проверки статуса на Render
 async def handle_ping(request):
@@ -82,7 +70,7 @@ async def start_web_server():
     await site.start()
 
 async def main():
-    print(f"Запуск веб-сервера на порту {PORT} и запуск бота...")
+    print(f"Запуск бота с моделью {MODEL_NAME} на порту {PORT}...")
     await start_web_server()
     await dp.start_polling(bot)
 
